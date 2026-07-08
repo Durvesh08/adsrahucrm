@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
@@ -15,7 +16,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { MessageSquare, UsersRound } from "lucide-react";
+import { ModeToggle } from "@/components/layout/mode-toggle";
+import { MessageSquare, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -69,16 +71,71 @@ function LoginPageInner() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-border bg-card">
+    <div className="adsrahu-chat-bg grid min-h-screen bg-background text-foreground lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="relative hidden min-h-screen items-center justify-center overflow-hidden border-r border-border px-10 py-12 lg:flex">
+        <div className="relative z-10 flex w-full max-w-xl flex-col items-center text-center">
+          <div className="adsrahu-brand-mark relative mb-8 h-52 w-52 overflow-hidden rounded-[2rem] border border-primary/30 bg-black shadow-2xl shadow-primary/20">
+            <Image
+              src="/adsrahu-logo.png"
+              alt="ADSRAHU logo"
+              fill
+              sizes="208px"
+              priority
+              className="object-cover"
+            />
+          </div>
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+            <MessageSquare className="size-3.5" />
+            WhatsApp-style CRM
+          </div>
+          <h1 className="adsrahu-wordmark relative overflow-hidden text-5xl font-black leading-tight text-foreground">
+            ADSRAHU CRM
+          </h1>
+          <p className="mt-4 max-w-md text-base leading-7 text-muted-foreground">
+            Manage conversations, contacts, campaigns, and follow-ups from one
+            focused workspace built for fast-moving marketing teams.
+          </p>
+          <div className="mt-8 grid w-full max-w-md grid-cols-2 gap-3">
+            <div className="rounded-lg border border-border bg-card/70 p-4 text-left">
+              <ShieldCheck className="mb-3 size-5 text-primary" />
+              <p className="text-sm font-semibold text-foreground">Team-ready</p>
+              <p className="mt-1 text-xs text-muted-foreground">Shared inbox and roles</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card/70 p-4 text-left">
+              <Sparkles className="mb-3 size-5 text-amber-400" />
+              <p className="text-sm font-semibold text-foreground">Growth focus</p>
+              <p className="mt-1 text-xs text-muted-foreground">Pipelines and broadcasts</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <main className="flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="absolute right-4 top-4">
+          <ModeToggle />
+        </div>
+        <Card className="w-full max-w-md border-border bg-card/95 shadow-2xl shadow-black/10">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+          <div className="relative mb-2 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-primary/30 bg-black shadow-lg shadow-primary/10 lg:hidden">
+            <Image
+              src="/adsrahu-logo.png"
+              alt="ADSRAHU logo"
+              fill
+              sizes="80px"
+              priority
+              className="object-cover"
+            />
+          </div>
+          <div className="mb-2 hidden h-12 w-12 items-center justify-center rounded-xl bg-primary/10 lg:flex">
             {inviteToken ? (
               <UsersRound className="h-6 w-6 text-primary" />
             ) : (
               <MessageSquare className="h-6 w-6 text-primary" />
             )}
           </div>
+          <p className="text-xs font-black uppercase tracking-[0.28em] text-primary">
+            ADSRAHU CRM
+          </p>
           <CardTitle className="text-xl text-foreground">
             {inviteToken ? t('titleAccept') : t('titleWelcome')}
           </CardTitle>
@@ -158,6 +215,7 @@ function LoginPageInner() {
           </p>
         </CardContent>
       </Card>
+      </main>
     </div>
   );
 }

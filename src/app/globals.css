@@ -228,3 +228,42 @@ html[data-theme="rose"] {
     @apply font-sans;
   }
 }
+
+@keyframes adsrahu-brand-float {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.015);
+  }
+}
+
+@keyframes adsrahu-sheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+.adsrahu-brand-mark {
+  animation: adsrahu-brand-float 5s ease-in-out infinite;
+}
+
+.adsrahu-wordmark {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.adsrahu-wordmark::after {
+  animation: adsrahu-sheen 3.8s ease-in-out infinite;
+}
+
+.adsrahu-chat-bg {
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--background), black 10%), var(--background)),
+    radial-gradient(circle at 1px 1px, color-mix(in oklch, var(--primary), transparent 88%) 1px, transparent 0);
+  background-size: auto, 22px 22px;
+}

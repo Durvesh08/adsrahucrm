@@ -8,6 +8,25 @@ import {
 } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
+function validateServerEnv(): string | null {
+  const missing = [
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'ENCRYPTION_KEY',
+  ].filter((key) => !process.env[key])
+
+  if (missing.length > 0) {
+    return `Server environment is missing: ${missing.join(', ')}`
+  }
+
+  const encryptionKey = process.env.ENCRYPTION_KEY ?? ''
+  if (!/^[0-9a-fA-F]{64}$/.test(encryptionKey)) {
+    return 'ENCRYPTION_KEY must be exactly 64 hexadecimal characters.'
+  }
+
+  return null
+}
+
 /**
  * Resolve the caller's account_id from their profile. Inlined here
  * (rather than going through `@/lib/auth/account.getCurrentAccount`)
@@ -38,6 +57,9 @@ async function resolveAccountId(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _adminClient: any = null
 function supabaseAdmin() {
+  const envError = validateServerEnv()
+  if (envError) throw new Error(envError)
+
   if (!_adminClient) {
     _adminClient = createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -165,6 +187,12 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
+    const envError = validateServerEnv()
+    if (envError) {
+      console.error('[whatsapp/config POST] Invalid server env:', envError)
+      return NextResponse.json({ error: envError }, { status: 500 })
+    }
+
     const supabase = await createClient()
 
     const {
@@ -272,11 +300,19 @@ export async function POST(request: Request) {
     // Look up any pre-existing row for this account so we know whether
     // this number is already registered with Meta — if so we can skip
     // /register when the user didn't provide a PIN this time around.
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('whatsapp_config')
       .select('id, registered_at, phone_number_id')
       .eq('account_id', accountId)
       .maybeSingle()
+
+    if (existingError) {
+      console.error('Error loading existing whatsapp_config:', existingError)
+      return NextResponse.json(
+        { error: `Failed to load existing configuration: ${existingError.message}` },
+        { status: 500 },
+      )
+    }
 
     const sameNumber =
       existing?.phone_number_id === phone_number_id &&
@@ -427,7 +463,15 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('Error in WhatsApp config POST:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Internal server error',
+      },
+      { status: 500 },
+    )
   }
 }
 

@@ -521,6 +521,41 @@ export default function InboxPage() {
     [activeConversation]
   );
 
+  const handleSidebarStatusChange = useCallback(
+    async (status: ConversationStatus) => {
+      if (!activeConversation) return;
+
+      const previous = activeConversation.status;
+      handleStatusChange(activeConversation.id, status);
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ status })
+        .eq("id", activeConversation.id);
+
+      if (error) {
+        handleStatusChange(activeConversation.id, previous);
+        toast.error("Failed to update status");
+      }
+    },
+    [activeConversation, handleStatusChange],
+  );
+
+  const handleActiveContactUpdated = useCallback((contact: Contact) => {
+    setActiveContact(contact);
+    setActiveConversation((prev) =>
+      prev ? { ...prev, contact } : prev,
+    );
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.contact_id === contact.id
+          ? { ...conversation, contact }
+          : conversation,
+      ),
+    );
+  }, []);
+
   const handleAssignChange = useCallback(
     (conversationId: string, assignedAgentId: string | null) => {
       setConversations((prev) =>
@@ -619,7 +654,12 @@ export default function InboxPage() {
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
           <div className="hidden lg:block">
-            <ContactSidebar contact={activeContact} />
+            <ContactSidebar
+              contact={activeContact}
+              conversationStatus={activeConversation?.status}
+              onStatusChange={handleSidebarStatusChange}
+              onContactUpdated={handleActiveContactUpdated}
+            />
           </div>
         )}
       </div>

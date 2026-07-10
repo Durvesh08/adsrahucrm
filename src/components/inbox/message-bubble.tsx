@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   ImageOff,
   CornerDownLeft,
+  ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -53,15 +54,18 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
-function MediaImage({ url, alt }: { url: string; alt: string }) {
+function useMediaObjectUrl(url: string) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const loadImage = useCallback(async () => {
+  const loadMedia = useCallback(async () => {
     if (!url) return;
 
-    // Proxy URLs need auth fetch to create blob URL
+    setLoading(true);
+    setError(false);
+    setSrc(null);
+
     if (url.startsWith("/api/whatsapp/media/")) {
       try {
         const res = await fetch(url);
@@ -81,14 +85,28 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }, [url]);
 
   useEffect(() => {
-    loadImage();
+    async function run() {
+      await loadMedia();
+    }
+
+    run();
+  }, [loadMedia]);
+
+  useEffect(() => {
     return () => {
-      if (src?.startsWith("blob:")) {
-        URL.revokeObjectURL(src);
-      }
+      if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadImage]);
+  }, [src]);
+
+  return { src, error, loading, setError };
+}
+
+function MediaImage({ url, alt }: { url: string; alt: string }) {
+  const { src, error, loading, setError } = useMediaObjectUrl(url);
+
+  const handleOpen = useCallback(() => {
+    if (src) window.open(src, "_blank", "noopener,noreferrer");
+  }, [src]);
 
   if (error) {
     return (
@@ -107,12 +125,73 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    <button
+      type="button"
+      onClick={handleOpen}
+      className="group relative block overflow-hidden rounded-lg text-left"
+      title="Open image"
+    >
+      <img
+        src={src ?? ""}
+        alt={alt}
+        className="max-h-64 max-w-60 object-cover"
+        onError={() => setError(true)}
+      />
+      <span className="absolute right-2 top-2 hidden rounded-full bg-black/60 p-1 text-white group-hover:block">
+        <ExternalLink className="h-3.5 w-3.5" />
+      </span>
+    </button>
+  );
+}
+
+function MediaVideo({ url }: { url: string }) {
+  const { src, error, loading } = useMediaObjectUrl(url);
+  if (error) return <MediaUnavailable label="Video" />;
+  if (loading) {
+    return (
+      <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+  return <video src={src ?? ""} controls className="max-h-64 max-w-60 rounded-lg" />;
+}
+
+function MediaAudio({ url }: { url: string }) {
+  const { src, error, loading } = useMediaObjectUrl(url);
+  if (error) return <MediaUnavailable label="Audio" />;
+  if (loading) {
+    return (
+      <div className="h-10 w-60 animate-pulse rounded-lg bg-muted" />
+    );
+  }
+  return <audio src={src ?? ""} controls className="max-w-60" />;
+}
+
+function MediaDocument({
+  url,
+  label,
+}: {
+  url: string;
+  label: string;
+}) {
+  const { src, error, loading } = useMediaObjectUrl(url);
+  if (error) return <MediaUnavailable label={label || "Document"} />;
+
+  return (
+    <a
+      href={src ?? url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-disabled={loading}
+      className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
+    >
+      <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+      <span className="truncate">
+        {loading ? "Loading document..." : label || "Document"}
+      </span>
+      {!loading && <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+    </a>
   );
 }
 
@@ -145,11 +224,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <video
-              src={message.media_url}
-              controls
-              className="max-h-64 max-w-60 rounded-lg"
-            />
+            <MediaVideo url={message.media_url} />
           ) : (
             <MediaUnavailable label="Video" />
           )}
@@ -165,7 +240,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <MediaAudio url={message.media_url} />
           ) : (
             <MediaUnavailable label="Audio" />
           )}
@@ -177,17 +252,10 @@ function MessageContent({ message }: { message: Message }) {
         return <MediaUnavailable label={message.content_text || "Document"} />;
       }
       return (
-        <a
-          href={message.media_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || "Document"}
-          </span>
-        </a>
+        <MediaDocument
+          url={message.media_url}
+          label={message.content_text || "Document"}
+        />
       );
 
     case "template":

@@ -1,45 +1,81 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { format, addDays, setHours, setMinutes } from "date-fns";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Deal, ContactNote, Tag, ConversationStatus } from "@/types";
 import {
   Phone,
   Mail,
   Copy,
   Check,
-  User,
+  UserPlus,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
   Plus,
+  Clock3,
+  CircleDot,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { format } from "date-fns";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  conversationStatus?: ConversationStatus;
+  onStatusChange?: (status: ConversationStatus) => void;
+  onContactUpdated?: (contact: Contact) => void;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+const STATUS_LABEL: Record<ConversationStatus, string> = {
+  open: "Open",
+  pending: "Waiting",
+  closed: "Closed",
+};
+
+const REMINDERS = [
+  { label: "Today", days: 0, hour: 18 },
+  { label: "Tomorrow", days: 1, hour: 10 },
+  { label: "3 days", days: 3, hour: 10 },
+];
+
+export function ContactSidebar({
+  contact,
+  conversationStatus = "open",
+  onStatusChange,
+  onContactUpdated,
+}: ContactSidebarProps) {
   const { accountId } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
-  const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [contactTags, setContactTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+  const [savingTagId, setSavingTagId] = useState<string | null>(null);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [savingReminder, setSavingReminder] = useState(false);
+  const contactNameRef = useRef<HTMLInputElement>(null);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, allTagsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -54,10 +90,15 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      supabase
+        .from("tags")
+        .select("*")
+        .order("name", { ascending: true }),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
+    if (allTagsRes.data) setAllTags(allTagsRes.data);
     if (tagsRes.data) {
       const mapped = tagsRes.data
         .filter((ct: Record<string, unknown>) => ct.tags)
@@ -65,59 +106,167 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
           ...(ct.tags as Tag),
           contact_tag_id: ct.id as string,
         }));
-      setTags(mapped);
+      setContactTags(mapped);
     }
   }, [contact]);
 
-  // Load on contact change. setContactData/setTags run inside async
-  // Supabase callbacks, not synchronously in the effect body.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContactData();
-  }, [fetchContactData]);
+  }, [contact, fetchContactData]);
+
+  const assignedTagIds = useMemo(
+    () => new Set(contactTags.map((tag) => tag.id)),
+    [contactTags],
+  );
+
+  const availableTags = useMemo(
+    () => allTags.filter((tag) => !assignedTagIds.has(tag.id)),
+    [allTags, assignedTagIds],
+  );
 
   const handleCopyPhone = useCallback(async () => {
     if (!contact?.phone) return;
     await navigator.clipboard.writeText(contact.phone);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    // Dep is the whole `contact` object (not `contact?.phone`) so the
-    // React Compiler's inference agrees with the manual dep list —
-    // fixes the `preserve-manual-memoization` lint error.
   }, [contact]);
 
+  const insertNote = useCallback(
+    async (text: string) => {
+      if (!contact || !text.trim() || !accountId) return null;
+
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const { data, error } = await supabase
+        .from("contact_notes")
+        .insert({
+          contact_id: contact.id,
+          account_id: accountId,
+          user_id: session?.user?.id,
+          note_text: text.trim(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        toast.error(error.message);
+        return null;
+      }
+
+      if (data) setNotes((prev) => [data, ...prev]);
+      return data as ContactNote;
+    },
+    [contact, accountId],
+  );
+
   const handleAddNote = useCallback(async () => {
-    if (!contact || !newNote.trim()) return;
-    if (!accountId) return;
+    if (!newNote.trim()) return;
     setAddingNote(true);
+    const inserted = await insertNote(newNote);
+    if (inserted) setNewNote("");
+    setAddingNote(false);
+  }, [newNote, insertNote]);
+
+  const handleSaveContact = useCallback(async () => {
+    const nextName = contactNameRef.current?.value.trim() ?? "";
+    if (!contact || !nextName) return;
+    setSavingContact(true);
 
     const supabase = createClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
-
     const { data, error } = await supabase
-      .from("contact_notes")
-      .insert({
-        contact_id: contact.id,
-        account_id: accountId,
-        user_id: user?.id,
-        note_text: newNote.trim(),
-      })
-      .select()
+      .from("contacts")
+      .update({ name: nextName })
+      .eq("id", contact.id)
+      .select("*")
       .single();
 
-    if (!error && data) {
-      setNotes((prev) => [data, ...prev]);
-      setNewNote("");
+    setSavingContact(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
     }
-    setAddingNote(false);
-  }, [contact, newNote, accountId]);
+
+    toast.success("Contact saved");
+    if (data) onContactUpdated?.(data as Contact);
+  }, [contact, onContactUpdated]);
+
+  const handleStatusChange = useCallback(
+    async (status: ConversationStatus) => {
+      if (!contact || status === conversationStatus) return;
+      setSavingStatus(true);
+      onStatusChange?.(status);
+      setSavingStatus(false);
+    },
+    [contact, conversationStatus, onStatusChange],
+  );
+
+  const handleAddTag = useCallback(
+    async (tagId: string | null) => {
+      if (!tagId) return;
+      if (!contact || assignedTagIds.has(tagId)) return;
+      const tag = allTags.find((item) => item.id === tagId);
+      if (!tag) return;
+
+      setSavingTagId(tagId);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("contact_tags")
+        .insert({ contact_id: contact.id, tag_id: tagId })
+        .select("id")
+        .single();
+
+      setSavingTagId(null);
+
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      setContactTags((prev) => [
+        ...prev,
+        { ...tag, contact_tag_id: data?.id as string },
+      ]);
+    },
+    [contact, assignedTagIds, allTags],
+  );
+
+  const handleRemoveTag = useCallback(async (contactTagId: string) => {
+    const snapshot = contactTags;
+    setContactTags((prev) => prev.filter((tag) => tag.contact_tag_id !== contactTagId));
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("contact_tags")
+      .delete()
+      .eq("id", contactTagId);
+
+    if (error) {
+      setContactTags(snapshot);
+      toast.error(error.message);
+    }
+  }, [contactTags]);
+
+  const handleReminder = useCallback(
+    async (days: number, hour: number) => {
+      setSavingReminder(true);
+      const due = setMinutes(setHours(addDays(new Date(), days), hour), 0);
+      const inserted = await insertNote(
+        `Follow-up reminder: ${format(due, "MMM d, yyyy h:mm a")}`,
+      );
+      setSavingReminder(false);
+      if (inserted) toast.success("Follow-up reminder saved");
+    },
+    [insertNote],
+  );
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
+      <div className="flex h-full w-80 items-center justify-center border-l border-border bg-card">
         <p className="text-sm text-muted-foreground">Select a conversation</p>
       </div>
     );
@@ -125,19 +274,19 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   const displayName = contact.name || contact.phone;
   const initials = displayName.charAt(0).toUpperCase();
+  const needsName = !contact.name?.trim();
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className="flex h-full w-80 flex-col border-l border-border bg-card">
       <ScrollArea className="flex-1">
-        <div className="p-4">
-          {/* Contact Info */}
+        <div className="space-y-4 p-4">
           <div className="flex flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-muted text-lg font-semibold text-foreground">
               {contact.avatar_url ? (
                 <img
                   src={contact.avatar_url}
                   alt={displayName}
-                  className="h-16 w-16 rounded-full object-cover"
+                  className="h-16 w-16 object-cover"
                 />
               ) : (
                 initials
@@ -151,14 +300,60 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
             )}
           </div>
 
-          {/* Phone */}
-          <div className="mt-4 space-y-2">
+          <section className="space-y-2 rounded-lg border border-border bg-background/40 p-3">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <CircleDot className="h-3 w-3" />
+              Chat Status
+            </div>
+            <Select
+              value={conversationStatus}
+              onValueChange={(value) => handleStatusChange(value as ConversationStatus)}
+              disabled={savingStatus}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </section>
+
+          {needsName && (
+            <section className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase text-primary">
+                <UserPlus className="h-3 w-3" />
+                Save Contact
+              </div>
+              <input
+                key={contact.id}
+                ref={contactNameRef}
+                defaultValue={contact.name ?? ""}
+                placeholder="Customer name"
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/60"
+              />
+              <Button
+                size="sm"
+                className="w-full"
+                disabled={savingContact}
+                onClick={handleSaveContact}
+              >
+                Save contact
+              </Button>
+            </section>
+          )}
+
+          <section className="space-y-2">
             <button
               onClick={handleCopyPhone}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
             >
               <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">{contact.phone}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{contact.phone}</span>
               {copied ? (
                 <Check className="h-3 w-3 text-primary" />
               ) : (
@@ -172,55 +367,138 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
-
-          {/* Tags */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <section className="space-y-2 border-t border-border pt-4">
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
               <TagIcon className="h-3 w-3" />
               Tags
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {tags.length === 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {contactTags.length === 0 ? (
                 <p className="px-1 text-xs text-muted-foreground">No tags</p>
               ) : (
-                tags.map((tag) => (
-                  <span
+                contactTags.map((tag) => (
+                  <button
                     key={tag.contact_tag_id}
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    onClick={() => handleRemoveTag(tag.contact_tag_id)}
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
                     style={{
                       backgroundColor: `${tag.color}20`,
                       color: tag.color,
+                      borderColor: `${tag.color}50`,
                     }}
+                    title="Remove tag"
                   >
                     {tag.name}
-                  </span>
+                    <X className="h-3 w-3" />
+                  </button>
                 ))
               )}
             </div>
-          </div>
 
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
+            {availableTags.length > 0 ? (
+              <Select
+                value=""
+                onValueChange={handleAddTag}
+                disabled={!!savingTagId}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={savingTagId ? "Adding..." : "+ Add tag"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTags.map((tag) => (
+                    <SelectItem key={tag.id} value={tag.id}>
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: tag.color }}
+                      />
+                      {tag.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="px-1 text-xs text-muted-foreground">
+                Create more tags in Settings.
+              </p>
+            )}
+          </section>
 
-          {/* Active Deals */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <section className="space-y-2 border-t border-border pt-4">
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
+              <Clock3 className="h-3 w-3" />
+              Follow-up
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {REMINDERS.map((item) => (
+                <Button
+                  key={item.label}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="px-2 text-xs"
+                  disabled={savingReminder}
+                  onClick={() => handleReminder(item.days, item.hour)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-2 border-t border-border pt-4">
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
+              <StickyNote className="h-3 w-3" />
+              Notes
+            </div>
+            <div className="flex gap-2">
+              <Textarea
+                value={newNote}
+                onChange={(event) => setNewNote(event.target.value)}
+                placeholder="Add a note..."
+                rows={2}
+                className="min-h-16 flex-1 resize-none text-xs"
+              />
+              <Button
+                size="sm"
+                className="h-auto px-2"
+                onClick={handleAddNote}
+                disabled={!newNote.trim() || addingNote}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {notes.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">No notes</p>
+              ) : (
+                notes.map((note) => (
+                  <div key={note.id} className="rounded-lg bg-muted px-3 py-2">
+                    <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+                      {note.note_text}
+                    </p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      {format(new Date(note.created_at), "MMM d, yyyy HH:mm")}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="space-y-2 border-t border-border pt-4">
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
               <DollarSign className="h-3 w-3" />
               Active Deals
             </div>
-            <div className="mt-2 space-y-2">
+            <div className="space-y-2">
               {deals.length === 0 ? (
                 <p className="px-1 text-xs text-muted-foreground">No deals</p>
               ) : (
                 deals.map((deal) => (
-                  <div
-                    key={deal.id}
-                    className="rounded-lg bg-muted px-3 py-2"
-                  >
+                  <div key={deal.id} className="rounded-lg bg-muted px-3 py-2">
                     <p className="text-sm font-medium text-foreground">
                       {deal.title}
                     </p>
@@ -245,53 +523,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 ))
               )}
             </div>
-          </div>
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
-
-          {/* Notes */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <StickyNote className="h-3 w-3" />
-              Notes
-            </div>
-            <div className="mt-2">
-              <div className="flex gap-2">
-                <textarea
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  placeholder="Add a note..."
-                  rows={2}
-                  className="flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
-                />
-                <Button
-                  size="sm"
-                  className="h-auto bg-primary px-2 hover:bg-primary/90"
-                  onClick={handleAddNote}
-                  disabled={!newNote.trim() || addingNote}
-                >
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </div>
-
-              <div className="mt-2 space-y-2">
-                {notes.map((note) => (
-                  <div
-                    key={note.id}
-                    className="rounded-lg bg-muted px-3 py-2"
-                  >
-                    <p className="whitespace-pre-wrap text-xs text-muted-foreground">
-                      {note.note_text}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {format(new Date(note.created_at), "MMM d, yyyy HH:mm")}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          </section>
         </div>
       </ScrollArea>
     </div>

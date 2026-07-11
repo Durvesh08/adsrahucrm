@@ -63,9 +63,11 @@ export function ContactSidebar({
   const [contactTags, setContactTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [newNote, setNewNote] = useState("");
+  const [newTagName, setNewTagName] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [savingTagId, setSavingTagId] = useState<string | null>(null);
+  const [creatingTag, setCreatingTag] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingReminder, setSavingReminder] = useState(false);
   const contactNameRef = useRef<HTMLInputElement>(null);
@@ -251,6 +253,64 @@ export function ContactSidebar({
     }
   }, [contactTags]);
 
+  const handleCreateAndAssignTag = useCallback(async () => {
+    const name = newTagName.trim();
+    if (!contact || !accountId || !name) return;
+
+    setCreatingTag(true);
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+
+    if (!userId) {
+      setCreatingTag(false);
+      toast.error("Not authenticated");
+      return;
+    }
+
+    const color = "#22c55e";
+    const { data: tag, error: tagError } = await supabase
+      .from("tags")
+      .insert({
+        user_id: userId,
+        account_id: accountId,
+        name,
+        color,
+      })
+      .select("*")
+      .single();
+
+    if (tagError || !tag) {
+      setCreatingTag(false);
+      toast.error(tagError?.message || "Failed to create tag");
+      return;
+    }
+
+    const { data: contactTag, error: assignError } = await supabase
+      .from("contact_tags")
+      .insert({ contact_id: contact.id, tag_id: tag.id })
+      .select("id")
+      .single();
+
+    setCreatingTag(false);
+
+    if (assignError) {
+      toast.error(assignError.message);
+      setAllTags((prev) => [...prev, tag as Tag].sort((a, b) => a.name.localeCompare(b.name)));
+      return;
+    }
+
+    setNewTagName("");
+    setAllTags((prev) => [...prev, tag as Tag].sort((a, b) => a.name.localeCompare(b.name)));
+    setContactTags((prev) => [
+      ...prev,
+      { ...(tag as Tag), contact_tag_id: contactTag?.id as string },
+    ]);
+    toast.success("Tag created");
+  }, [newTagName, contact, accountId]);
+
   const handleReminder = useCallback(
     async (days: number, hour: number) => {
       setSavingReminder(true);
@@ -420,9 +480,27 @@ export function ContactSidebar({
               </Select>
             ) : (
               <p className="px-1 text-xs text-muted-foreground">
-                Create more tags in Settings.
+                No more tags available.
               </p>
             )}
+
+            <div className="flex gap-2">
+              <input
+                value={newTagName}
+                onChange={(event) => setNewTagName(event.target.value)}
+                placeholder="New tag"
+                className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary/60"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 text-xs"
+                disabled={!newTagName.trim() || creatingTag}
+                onClick={handleCreateAndAssignTag}
+              >
+                Create
+              </Button>
+            </div>
           </section>
 
           <section className="space-y-2 border-t border-border pt-4">

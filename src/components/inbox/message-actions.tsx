@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CornerUpLeft, Copy, SmilePlus } from "lucide-react";
+import { CornerUpLeft, Copy, SmilePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -19,6 +19,7 @@ interface MessageActionsProps {
   message: Message;
   onReply: () => void;
   onReact: (emoji: string) => void;
+  onDeleteForMe?: () => void;
   children: ReactNode;
 }
 
@@ -31,6 +32,7 @@ export function MessageActions({
   message,
   onReply,
   onReact,
+  onDeleteForMe,
   children,
 }: MessageActionsProps) {
   // Touch devices have no hover. Long-press fires `contextmenu`; we capture
@@ -70,6 +72,11 @@ export function MessageActions({
 
   const handleReply = () => {
     onReply();
+    setTouchOpen(false);
+  };
+
+  const handleDeleteForMe = () => {
+    onDeleteForMe?.();
     setTouchOpen(false);
   };
 
@@ -141,6 +148,17 @@ export function MessageActions({
         >
           <Copy className="h-3.5 w-3.5" />
         </button>
+        {onDeleteForMe && (
+          <button
+            type="button"
+            onClick={handleDeleteForMe}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-destructive/10 hover:text-destructive"
+            aria-label="Delete for me"
+            title="Delete for me"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       </div>
     </div>

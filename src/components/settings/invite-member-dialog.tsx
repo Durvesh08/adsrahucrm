@@ -52,6 +52,7 @@ const EXPIRY_OPTIONS: { value: string; label: string }[] = [
   { value: '1', label: '1 day' },
   { value: '7', label: '7 days' },
   { value: '30', label: '30 days' },
+  { value: '36500', label: 'Never expires' },
 ];
 
 const ROLE_DESCRIPTIONS: Record<InviteRole, string> = {
@@ -74,6 +75,10 @@ interface CreatedInvite {
   /** Snapshotted at creation time so a later account rename can't
    *  retroactively change the wa.me message text on the result step. */
   accountName: string;
+}
+
+function expiryLabel(days: number): string {
+  return days >= 36500 ? 'never expires' : `${days} day${days === 1 ? '' : 's'}`;
 }
 
 export function InviteMemberDialog({
@@ -170,7 +175,7 @@ export function InviteMemberDialog({
     // for users in multi-team contexts where "our wacrm account"
     // wouldn't be enough to disambiguate.
     const accountName = result?.accountName ?? 'our wacrm account';
-    const message = `Join ${accountName} on wacrm using this link (valid for ${result?.expiresInDays} days): ${url}`;
+    const message = `Join ${accountName} on wacrm using this link (${expiryLabel(result?.expiresInDays ?? 7)}): ${url}`;
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }
 
@@ -197,9 +202,9 @@ export function InviteMemberDialog({
                 Share this link with your new teammate. They&apos;ll be able
                 to sign up (or sign in) and join the account as{' '}
                 <span className="font-medium text-muted-foreground">{result.role}</span>
-                . The link is valid for{' '}
+                . The link{' '}
                 <span className="font-medium text-muted-foreground">
-                  {result.expiresInDays} day{result.expiresInDays === 1 ? '' : 's'}
+                  {expiryLabel(result.expiresInDays)}
                 </span>
                 .
               </DialogDescription>

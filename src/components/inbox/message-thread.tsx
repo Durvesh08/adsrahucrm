@@ -36,7 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
@@ -150,6 +149,10 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
 const DOODLE_BG_CLASSES =
   "bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
 
+function hiddenMessagesKey(userId: string | undefined, conversationId: string) {
+  return `adsrahu:hidden-messages:${userId ?? "anonymous"}:${conversationId}`;
+}
+
 export function MessageThread({
   conversation,
   contact,
@@ -195,6 +198,9 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -408,6 +414,19 @@ export function MessageThread({
   useEffect(() => {
     setReplyTo(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setHiddenMessageIds(new Set());
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(hiddenMessagesKey(user?.id, conversationId));
+      setHiddenMessageIds(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      setHiddenMessageIds(new Set());
+    }
+  }, [conversationId, user?.id]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
@@ -693,6 +712,28 @@ export function MessageThread({
     [authorLabelFor],
   );
 
+  const handleDeleteForMe = useCallback(
+    (messageId: string) => {
+      if (!conversationId) return;
+      setHiddenMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(messageId);
+        try {
+          localStorage.setItem(
+            hiddenMessagesKey(user?.id, conversationId),
+            JSON.stringify([...next]),
+          );
+        } catch {
+          // Local hide still works for this render even if persistence fails.
+        }
+        return next;
+      });
+      if (replyTo?.id === messageId) setReplyTo(null);
+      toast.success("Message deleted for you");
+    },
+    [conversationId, user?.id, replyTo?.id],
+  );
+
   // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
   // The "toggle" semantic (pill click) is computed at the call site where the
   // current reactions for the bubble are already in scope — keeps this
@@ -798,7 +839,8 @@ export function MessageThread({
   }
 
   const displayName = contact.name || contact.phone;
-  const messageGroups = groupMessagesByDate(messages);
+  const visibleMessages = messages.filter((msg) => !hiddenMessageIds.has(msg.id));
+  const messageGroups = groupMessagesByDate(visibleMessages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
@@ -1003,7 +1045,7 @@ export function MessageThread({
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : messages.length === 0 ? (
+        ) : visibleMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">No messages yet</p>
             <p className="text-xs text-muted-foreground">
@@ -1052,6 +1094,7 @@ export function MessageThread({
                         onReact={(emoji) => {
                           if (emoji) void postReaction(msg.id, emoji);
                         }}
+                        onDeleteForMe={() => handleDeleteForMe(msg.id)}
                       >
                         <MessageBubble
                           message={msg}

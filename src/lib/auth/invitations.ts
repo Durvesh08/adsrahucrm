@@ -28,8 +28,8 @@ import { createHash, randomBytes } from "node:crypto";
 /** Default invite link lifetime if the caller doesn't specify. */
 export const DEFAULT_INVITE_EXPIRY_DAYS = 7;
 
-/** Hard ceiling on user-supplied `expiresInDays` (1 year). */
-export const MAX_INVITE_EXPIRY_DAYS = 365;
+/** Hard ceiling on user-supplied `expiresInDays` (100 years / effectively permanent). */
+export const MAX_INVITE_EXPIRY_DAYS = 36500;
 
 export interface GeneratedToken {
   /** Plaintext token — return to the creator ONCE, never persist. */

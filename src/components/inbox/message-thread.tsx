@@ -26,6 +26,8 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Pin,
+  Tag,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +74,10 @@ interface MessageThreadProps {
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
+  ) => void;
+  onConversationPatch?: (
+    conversationId: string,
+    patch: Partial<Conversation>,
   ) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
@@ -137,6 +143,8 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
   { label: "Closed", value: "closed", color: "text-muted-foreground" },
 ];
 
+const CHAT_LABELS = ["Hot Lead", "Follow up", "Important", "Payment", "Support"];
+
 /**
  * WhatsApp-style doodle background applied to the chat area (both the
  * active thread and the empty state). The SVG tile lives at
@@ -162,6 +170,7 @@ export function MessageThread({
   onUpdateMessage,
   onStatusChange,
   onAssignChange,
+  onConversationPatch,
   onBack,
   resyncToken = 0,
   onRefresh,
@@ -819,6 +828,28 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
+  const patchConversation = useCallback(
+    async (patch: Partial<Conversation>) => {
+      if (!conversation) return;
+      onConversationPatch?.(conversation.id, patch);
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update(patch)
+        .eq("id", conversation.id);
+
+      if (error) {
+        toast.error("Failed to update chat");
+        onConversationPatch?.(conversation.id, {
+          is_pinned: conversation.is_pinned,
+          chat_label: conversation.chat_label,
+        });
+      }
+    },
+    [conversation, onConversationPatch],
+  );
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -946,6 +977,59 @@ export function MessageThread({
               />
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => void patchConversation({ is_pinned: !conversation.is_pinned })}
+            aria-label={conversation.is_pinned ? "Unpin chat" : "Pin chat"}
+            title={conversation.is_pinned ? "Unpin chat" : "Pin chat"}
+            className={cn(
+              "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+              conversation.is_pinned ? "text-primary" : "text-muted-foreground",
+            )}
+          >
+            <Pin className={cn("h-3.5 w-3.5", conversation.is_pinned && "fill-current")} />
+          </button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs hover:bg-muted",
+                conversation.chat_label ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              <Tag className="h-3 w-3" />
+              <span className="hidden sm:inline">
+                {conversation.chat_label ?? "Label"}
+              </span>
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-border bg-popover">
+              {CHAT_LABELS.map((label) => (
+                <DropdownMenuItem
+                  key={label}
+                  onClick={() => void patchConversation({ chat_label: label })}
+                  className={cn(
+                    "text-sm",
+                    conversation.chat_label === label ? "text-primary" : "text-popover-foreground",
+                  )}
+                >
+                  {label}
+                </DropdownMenuItem>
+              ))}
+              {conversation.chat_label && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => void patchConversation({ chat_label: null })}
+                    className="text-sm text-muted-foreground"
+                  >
+                    Clear label
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Status dropdown */}
           <DropdownMenu>

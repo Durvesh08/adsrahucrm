@@ -152,6 +152,8 @@ export interface Conversation {
   user_id: string;
   contact_id: string;
   status: ConversationStatus;
+  is_pinned?: boolean;
+  chat_label?: string | null;
   assigned_agent_id?: string;
   last_message_text?: string;
   last_message_at?: string;

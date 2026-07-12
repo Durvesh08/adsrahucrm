@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -54,72 +54,17 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
-function useMediaObjectUrl(url: string) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  const loadMedia = useCallback(async () => {
-    if (!url) return;
-
-    setLoading(true);
-    setError(false);
-    setSrc(null);
-
-    if (url.startsWith("/api/whatsapp/media/")) {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load media");
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        setSrc(blobUrl);
-      } catch {
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setSrc(url);
-      setLoading(false);
-    }
-  }, [url]);
-
-  useEffect(() => {
-    async function run() {
-      await loadMedia();
-    }
-
-    run();
-  }, [loadMedia]);
-
-  useEffect(() => {
-    return () => {
-      if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
-    };
-  }, [src]);
-
-  return { src, error, loading, setError };
-}
-
 function MediaImage({ url, alt }: { url: string; alt: string }) {
-  const { src, error, loading, setError } = useMediaObjectUrl(url);
+  const [error, setError] = useState(false);
 
   const handleOpen = useCallback(() => {
-    if (src) window.open(src, "_blank", "noopener,noreferrer");
-  }, [src]);
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [url]);
 
   if (error) {
     return (
       <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
         <ImageOff className="h-8 w-8 text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
   }
@@ -132,7 +77,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
       title="Open image"
     >
       <img
-        src={src ?? ""}
+        src={url}
         alt={alt}
         className="max-h-64 max-w-60 object-cover"
         onError={() => setError(true)}
@@ -145,27 +90,24 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 }
 
 function MediaVideo({ url }: { url: string }) {
-  const { src, error, loading } = useMediaObjectUrl(url);
+  const [error, setError] = useState(false);
   if (error) return <MediaUnavailable label="Video" />;
-  if (loading) {
-    return (
-      <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-  return <video src={src ?? ""} controls className="max-h-64 max-w-60 rounded-lg" />;
+  return (
+    <video
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+      className="max-h-64 max-w-60 rounded-lg bg-black"
+      onError={() => setError(true)}
+    />
+  );
 }
 
 function MediaAudio({ url }: { url: string }) {
-  const { src, error, loading } = useMediaObjectUrl(url);
+  const [error, setError] = useState(false);
   if (error) return <MediaUnavailable label="Audio" />;
-  if (loading) {
-    return (
-      <div className="h-10 w-60 animate-pulse rounded-lg bg-muted" />
-    );
-  }
-  return <audio src={src ?? ""} controls className="max-w-60" />;
+  return <audio src={url} controls className="max-w-60" onError={() => setError(true)} />;
 }
 
 function MediaDocument({
@@ -175,23 +117,50 @@ function MediaDocument({
   url: string;
   label: string;
 }) {
-  const { src, error, loading } = useMediaObjectUrl(url);
-  if (error) return <MediaUnavailable label={label || "Document"} />;
+  const href = url.startsWith("/api/whatsapp/media/")
+    ? `${url}?download=1`
+    : url;
 
   return (
     <a
-      href={src ?? url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-disabled={loading}
       className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
     >
       <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
       <span className="truncate">
-        {loading ? "Loading document..." : label || "Document"}
+        {label || "Document"}
       </span>
-      {!loading && <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     </a>
+  );
+}
+
+const URL_RE = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+const URL_ONLY_RE = /^(https?:\/\/[^\s<]+|www\.[^\s<]+)$/i;
+
+function LinkifiedText({ text }: { text: string }) {
+  const parts = text.split(URL_RE);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (!URL_ONLY_RE.test(part)) return <span key={index}>{part}</span>;
+        const href = part.startsWith("http") ? part : `https://${part}`;
+        return (
+          <a
+            key={index}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-current/40 underline-offset-2 hover:decoration-current"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {part}
+          </a>
+        );
+      })}
+    </>
   );
 }
 
@@ -200,7 +169,7 @@ function MessageContent({ message }: { message: Message }) {
     case "text":
       return (
         <p className="whitespace-pre-wrap break-words text-sm">
-          {message.content_text}
+          <LinkifiedText text={message.content_text ?? ""} />
         </p>
       );
 
@@ -214,7 +183,7 @@ function MessageContent({ message }: { message: Message }) {
           )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <LinkifiedText text={message.content_text} />
             </p>
           )}
         </div>
@@ -230,7 +199,7 @@ function MessageContent({ message }: { message: Message }) {
           )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <LinkifiedText text={message.content_text} />
             </p>
           )}
         </div>
@@ -267,7 +236,7 @@ function MessageContent({ message }: { message: Message }) {
           </span>
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <LinkifiedText text={message.content_text} />
             </p>
           )}
         </div>
@@ -294,7 +263,7 @@ function MessageContent({ message }: { message: Message }) {
             Button reply
           </span>
           <p className="whitespace-pre-wrap break-words text-sm">
-            {message.content_text || "[Interactive reply]"}
+            <LinkifiedText text={message.content_text || "[Interactive reply]"} />
           </p>
         </div>
       );
@@ -303,7 +272,7 @@ function MessageContent({ message }: { message: Message }) {
     default:
       return (
         <p className="whitespace-pre-wrap break-words text-sm">
-          {message.content_text || "[Unsupported message type]"}
+          <LinkifiedText text={message.content_text || "[Unsupported message type]"} />
         </p>
       );
   }

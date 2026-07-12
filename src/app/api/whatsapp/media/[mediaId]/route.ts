@@ -8,6 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ mediaId: string }> }
 ) {
   try {
+    const { searchParams } = new URL(request.url)
     const { mediaId } = await params
 
     if (!mediaId) {
@@ -77,6 +78,9 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
+        'Content-Disposition': searchParams.get('download') === '1'
+          ? `attachment; filename="whatsapp-${mediaId}"`
+          : 'inline',
         'Cache-Control': 'public, max-age=86400',
       },
     })

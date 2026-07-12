@@ -9,7 +9,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X } from "lucide-react";
+import { Search, ChevronDown, X, Pin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -182,7 +182,13 @@ export function ConversationList({
       });
     }
 
-    return result;
+    return [...result].sort((a, b) => {
+      if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+      return (
+        new Date(b.last_message_at ?? b.updated_at).getTime() -
+        new Date(a.last_message_at ?? a.updated_at).getTime()
+      );
+    });
   }, [conversations, filter, search, selectedTagIds, selectedCompany]);
 
   const toggleTag = useCallback((id: string) => {
@@ -466,11 +472,21 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {displayName}
+          <span className="flex min-w-0 items-center gap-1 truncate text-sm font-medium text-foreground">
+            {conversation.is_pinned && (
+              <Pin className="h-3 w-3 shrink-0 fill-primary text-primary" />
+            )}
+            <span className="truncate">{displayName}</span>
           </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
         </div>
+        {conversation.chat_label && (
+          <div className="mt-1">
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+              {conversation.chat_label}
+            </span>
+          </div>
+        )}
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="truncate text-xs text-muted-foreground">
             {conversation.last_message_text || "No messages yet"}

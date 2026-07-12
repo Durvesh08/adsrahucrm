@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -14,6 +14,11 @@ import {
   ImageOff,
   CornerDownLeft,
   ExternalLink,
+  X,
+  Download,
+  Play,
+  FileDown,
+  Link as LinkIcon,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -54,12 +59,119 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
+type MediaViewerState =
+  | { type: "image"; url: string; title: string }
+  | { type: "video"; url: string; title: string };
+
+function downloadUrlFor(url: string) {
+  return url.startsWith("/api/whatsapp/media/")
+    ? `${url}?download=1`
+    : url;
+}
+
+function MediaViewer({
+  viewer,
+  onClose,
+}: {
+  viewer: MediaViewerState | null;
+  onClose: () => void;
+}) {
+  const stateIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!viewer) return;
+
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+
+    stateIdRef.current = id;
+    window.history.pushState({ adsrahuMediaViewer: id }, "", window.location.href);
+    document.body.style.overflow = "hidden";
+
+    const handlePopState = () => {
+      stateIdRef.current = null;
+      onClose();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [viewer, onClose]);
+
+  const handleClose = useCallback(() => {
+    const stateId = stateIdRef.current;
+    stateIdRef.current = null;
+    onClose();
+    if (stateId && window.history.state?.adsrahuMediaViewer === stateId) {
+      window.history.back();
+    }
+  }, [onClose]);
+
+  if (!viewer) return null;
+
+  const downloadHref = downloadUrlFor(viewer.url);
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex flex-col bg-black text-white"
+      role="dialog"
+      aria-modal="true"
+      aria-label={viewer.title}
+    >
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 bg-black/80 px-3 backdrop-blur sm:px-4">
+        <button
+          type="button"
+          onClick={handleClose}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
+          aria-label="Close preview"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <p className="min-w-0 flex-1 truncate text-center text-sm font-medium">
+          {viewer.title}
+        </p>
+        <a
+          href={downloadHref}
+          download
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
+          aria-label="Download"
+        >
+          <Download className="h-5 w-5" />
+        </a>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center p-2 sm:p-4">
+        {viewer.type === "image" ? (
+          <img
+            src={viewer.url}
+            alt={viewer.title}
+            className="max-h-full max-w-full touch-pan-y object-contain"
+          />
+        ) : (
+          <video
+            src={viewer.url}
+            controls
+            autoPlay
+            playsInline
+            className="max-h-full max-w-full rounded-md bg-black"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [error, setError] = useState(false);
+  const [viewer, setViewer] = useState<MediaViewerState | null>(null);
 
   const handleOpen = useCallback(() => {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, [url]);
+    setViewer({ type: "image", url, title: alt });
+  }, [alt, url]);
 
   if (error) {
     return (
@@ -70,37 +182,54 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleOpen}
-      className="group relative block overflow-hidden rounded-lg text-left"
-      title="Open image"
-    >
-      <img
-        src={url}
-        alt={alt}
-        className="max-h-64 max-w-60 object-cover"
-        onError={() => setError(true)}
-      />
-      <span className="absolute right-2 top-2 hidden rounded-full bg-black/60 p-1 text-white group-hover:block">
-        <ExternalLink className="h-3.5 w-3.5" />
-      </span>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleOpen}
+        className="group relative block overflow-hidden rounded-lg text-left"
+        title="Open image"
+      >
+        <img
+          src={url}
+          alt={alt}
+          className="max-h-64 max-w-60 object-cover"
+          onError={() => setError(true)}
+        />
+        <span className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-2 py-2 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+          <span>Tap to view</span>
+          <ExternalLink className="h-3.5 w-3.5" />
+        </span>
+      </button>
+      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} />
+    </>
   );
 }
 
 function MediaVideo({ url }: { url: string }) {
   const [error, setError] = useState(false);
+  const [viewer, setViewer] = useState<MediaViewerState | null>(null);
   if (error) return <MediaUnavailable label="Video" />;
   return (
-    <video
-      src={url}
-      controls
-      playsInline
-      preload="metadata"
-      className="max-h-64 max-w-60 rounded-lg bg-black"
-      onError={() => setError(true)}
-    />
+    <div className="relative overflow-hidden rounded-lg bg-black">
+      <video
+        src={url}
+        controls
+        playsInline
+        preload="metadata"
+        className="max-h-64 max-w-60 bg-black"
+        onError={() => setError(true)}
+      />
+      <button
+        type="button"
+        onClick={() => setViewer({ type: "video", url, title: "Shared video" })}
+        className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+        aria-label="Open video full screen"
+        title="Open video"
+      >
+        <Play className="h-4 w-4 fill-current" />
+      </button>
+      <MediaViewer viewer={viewer} onClose={() => setViewer(null)} />
+    </div>
   );
 }
 
@@ -117,28 +246,83 @@ function MediaDocument({
   url: string;
   label: string;
 }) {
-  const href = url.startsWith("/api/whatsapp/media/")
-    ? `${url}?download=1`
-    : url;
+  const href = downloadUrlFor(url);
+  const extension = label.includes(".") ? label.split(".").pop()?.toUpperCase() : "FILE";
+
+  return (
+    <div className="w-60 rounded-xl border border-border/70 bg-background/70 p-2 shadow-sm">
+      <div className="flex items-center gap-2">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <FileText className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{label || "Document"}</p>
+          <p className="text-[10px] uppercase text-muted-foreground">{extension}</p>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-muted px-2 text-xs font-medium hover:bg-muted/80"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open
+        </a>
+        <a
+          href={href}
+          download
+          className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary-hover"
+        >
+          <FileDown className="h-3.5 w-3.5" />
+          Download
+        </a>
+      </div>
+    </div>
+  );
+}
+
+const URL_RE = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+const URL_ONLY_RE = /^(https?:\/\/[^\s<]+|www\.[^\s<]+)$/i;
+
+function normalizeHref(url: string) {
+  return url.startsWith("http") ? url : `https://${url}`;
+}
+
+function firstUrl(text: string) {
+  return text.match(URL_RE)?.[0] ?? null;
+}
+
+function LinkPreview({ url }: { url: string }) {
+  const href = normalizeHref(url);
+  const domain = useMemo(() => {
+    try {
+      return new URL(href).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  }, [href, url]);
 
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
+      onClick={(event) => event.stopPropagation()}
+      className="mt-2 flex max-w-60 items-center gap-2 rounded-xl border border-border/70 bg-background/70 p-2 text-xs hover:bg-muted/70"
     >
-      <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-      <span className="truncate">
-        {label || "Document"}
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+        <LinkIcon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{domain}</span>
+        <span className="block truncate text-muted-foreground">{url}</span>
       </span>
       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     </a>
   );
 }
-
-const URL_RE = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
-const URL_ONLY_RE = /^(https?:\/\/[^\s<]+|www\.[^\s<]+)$/i;
 
 function LinkifiedText({ text }: { text: string }) {
   const parts = text.split(URL_RE);
@@ -146,7 +330,7 @@ function LinkifiedText({ text }: { text: string }) {
     <>
       {parts.map((part, index) => {
         if (!URL_ONLY_RE.test(part)) return <span key={index}>{part}</span>;
-        const href = part.startsWith("http") ? part : `https://${part}`;
+        const href = normalizeHref(part);
         return (
           <a
             key={index}
@@ -165,12 +349,17 @@ function LinkifiedText({ text }: { text: string }) {
 }
 
 function MessageContent({ message }: { message: Message }) {
+  const previewUrl = message.content_text ? firstUrl(message.content_text) : null;
+
   switch (message.content_type) {
     case "text":
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
-          <LinkifiedText text={message.content_text ?? ""} />
-        </p>
+        <div>
+          <p className="whitespace-pre-wrap break-words text-sm">
+            <LinkifiedText text={message.content_text ?? ""} />
+          </p>
+          {previewUrl && <LinkPreview url={previewUrl} />}
+        </div>
       );
 
     case "image":
@@ -186,6 +375,7 @@ function MessageContent({ message }: { message: Message }) {
               <LinkifiedText text={message.content_text} />
             </p>
           )}
+          {previewUrl && <LinkPreview url={previewUrl} />}
         </div>
       );
 
@@ -202,6 +392,7 @@ function MessageContent({ message }: { message: Message }) {
               <LinkifiedText text={message.content_text} />
             </p>
           )}
+          {previewUrl && <LinkPreview url={previewUrl} />}
         </div>
       );
 

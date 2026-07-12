@@ -9,6 +9,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { sendAccountPushNotification } from '@/lib/mobile/firebase-admin'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -784,6 +785,13 @@ async function processMessage(
       },
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
+
+  sendAccountPushNotification(supabaseAdmin(), {
+    accountId,
+    conversationId: conversation.id,
+    title: contactRecord.name || contactName || senderPhone,
+    body: contentText || `[${contentType}]`,
+  }).catch((err) => console.error('[push] dispatch failed:', err))
 
   // AI auto-reply. Runs only for plain-text inbound the deterministic
   // flow runner did NOT consume (flows win over the LLM), and only when

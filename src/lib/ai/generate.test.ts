@@ -163,3 +163,58 @@ describe('generateReply — Anthropic', () => {
     expect(body.messages).toHaveLength(1)
   })
 })
+
+describe('generateReply — Gemini', () => {
+  it('calls generateContent with the model and API key and parses text parts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        candidates: [
+          { content: { parts: [{ text: 'Hello' }, { text: ' from Gemini' }] } },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({
+        provider: 'gemini',
+        model: 'gemini-test',
+        apiKey: 'AIza-test',
+      }),
+      systemPrompt: 'sys',
+      messages: [
+        { role: 'user', content: 'Hi' },
+        { role: 'assistant', content: 'Hello' },
+      ],
+    })
+
+    expect(res).toEqual({ text: 'Hello from Gemini', handoff: false })
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toContain('generativelanguage.googleapis.com')
+    expect(url).toContain('gemini-test:generateContent')
+    expect(url).toContain('key=AIza-test')
+    const body = JSON.parse(opts.body)
+    expect(body.systemInstruction.parts[0].text).toBe('sys')
+    expect(body.contents).toEqual([
+      { role: 'user', parts: [{ text: 'Hi' }] },
+      { role: 'model', parts: [{ text: 'Hello' }] },
+    ])
+  })
+
+  it('maps a Gemini auth failure to invalid_key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        errResponse(403, { error: { message: 'API key not valid' } }),
+      ),
+    )
+
+    await expect(
+      generateReply({
+        config: config({ provider: 'gemini', apiKey: 'bad' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_key', status: 401 })
+  })
+})
